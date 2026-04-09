@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Route Dispatcher</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0f1117;--surface:#1a1d27;--border:#2a2d3a;
+  --text:#e4e4e7;--muted:#71717a;--accent:#f97316;
+  --accent2:#fb923c;--green:#22c55e;--red:#ef4444;
+}
+html,body{height:100%;font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--text)}
+#app{display:grid;grid-template-columns:380px 1fr;height:100vh}
+@media(max-width:800px){#app{grid-template-columns:1fr;grid-template-rows:auto 1fr}}
+
+/* Sidebar */
+.sidebar{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.sidebar-header{padding:24px 24px 0;flex-shrink:0}
+.logo{display:flex;align-items:center;gap:10px;margin-bottom:20px}
+.logo-icon{width:36px;height:36px;background:var(--accent);border-radius:8px;display:grid;place-items:center;font-size:18px}
+.logo h1{font-size:18px;font-weight:700;letter-spacing:-.3px}
+.logo span{color:var(--muted);font-size:12px;font-family:'DM Mono',monospace}
+
+.home-base{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:16px}
+.home-base label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-family:'DM Mono',monospace;display:block;margin-bottom:6px}
+.home-base .addr{font-size:14px;color:var(--accent2);font-weight:600}
+
+.upload-zone{border:2px dashed var(--border);border-radius:10px;padding:28px 20px;text-align:center;cursor:pointer;transition:.2s}
+.upload-zone:hover,.upload-zone.dragover{border-color:var(--accent);background:rgba(249,115,22,.05)}
+.upload-zone input{display:none}
+.upload-zone p{font-size:13px;color:var(--muted);margin-top:6px}
+.upload-zone .icon{font-size:28px;margin-bottom:4px}
+
+.actions{padding:16px 24px;display:flex;gap:10px;flex-shrink:0}
+.btn{padding:10px 18px;border:none;border-radius:8px;font-family:inherit;font-weight:600;font-size:13px;cursor:pointer;transition:.15s}
+.btn-primary{background:var(--accent);color:#fff;flex:1}
+.btn-primary:hover{background:var(--accent2)}
+.btn-primary:disabled{opacity:.4;cursor:default}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--muted);flex:0}
+.btn-outline:hover{border-color:var(--accent);color:var(--text)}
+
+.stop-list{flex:1;overflow-y:auto;padding:0 24px 24px}
+.stop-list::-webkit-scrollbar{width:5px}
+.stop-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:9px}
+
+.stop-item{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+.stop-num{width:26px;height:26px;border-radius:50%;background:var(--bg);border:2px solid var(--accent);display:grid;place-items:center;font-size:11px;font-weight:700;color:var(--accent);flex-shrink:0;font-family:'DM Mono',monospace;margin-top:2px}
+.stop-num.home{background:var(--accent);color:#fff;border-color:var(--accent)}
+.stop-info{flex:1;min-width:0}
+.stop-info .name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stop-info .addr{font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stop-info .status{font-size:10px;margin-top:3px;font-family:'DM Mono',monospace}
+.status.ok{color:var(--green)}.status.err{color:var(--red)}.status.pending{color:var(--muted)}
+
+.summary{padding:16px 24px;background:var(--bg);border-top:1px solid var(--border);flex-shrink:0;font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);display:flex;gap:20px}
+.summary strong{color:var(--text)}
+
+/* Map */
+.map-wrap{position:relative}
+#map{width:100%;height:100%}
+.leaflet-tile-pane{filter:saturate(.3) brightness(.85) contrast(1.1)}
+.loading-overlay{position:absolute;inset:0;background:rgba(15,17,23,.85);display:grid;place-items:center;z-index:999;opacity:0;pointer-events:none;transition:.3s}
+.loading-overlay.show{opacity:1;pointer-events:all}
+.spinner{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.csv-info{position:absolute;top:16px;right:16px;z-index:500;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 18px;font-size:12px;font-family:'DM Mono',monospace;color:var(--muted);max-width:260px}
+.csv-info h3{font-family:'Instrument Sans',sans-serif;font-size:13px;color:var(--text);margin-bottom:4px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <div class="logo-icon">🚚</div>
+        <div><h1>Route Dispatcher</h1><span>v1.0</span></div>
+      </div>
+      <div class="home-base">
+        <label>🏠 Home Base</label>
+        <div class="addr">2450 Shader Rd, Orlando, FL</div>
+      </div>
+      <div class="upload-zone" id="dropZone">
+        <div class="icon">📄</div>
+        <strong>Drop CSV here or click to upload</strong>
+        <p>Columns: name, address &nbsp;(or)&nbsp; name, lat, lng</p>
+        <input type="file" id="csvInput" accept=".csv,.tsv,.txt">
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" id="routeBtn" disabled>Optimize Route</button>
+      <button class="btn btn-outline" id="clearBtn">Clear</button>
+    </div>
+    <div class="stop-list" id="stopList"></div>
+    <div class="summary" id="summary" style="display:none">
+      <div>Stops: <strong id="sumStops">0</strong></div>
+      <div>Est. dist: <strong id="sumDist">—</strong></div>
+    </div>
+  </div>
+  <div class="map-wrap">
+    <div id="map"></div>
+    <div class="loading-overlay" id="loader"><div class="spinner"></div></div>
+    <div class="csv-info">
+      <h3>CSV Format</h3>
+      name, address<br>
+      <em>— or —</em><br>
+      name, latitude, longitude
+    </div>
+  </div>
+</div>
+
+<script>
+const HOME = { name: "Home Base – 2450 Shader Rd", lat: 28.5765, lng: -81.3341, address: "2450 Shader Rd, Orlando, FL" };
+let stops = [];
+let map, routeLine, markers = [];
+
+// --- Map init ---
+map = L.map('map',{zoomControl:false}).setView([HOME.lat, HOME.lng], 11);
+L.control.zoom({position:'bottomright'}).addTo(map);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+  attribution:'© OpenStreetMap © CARTO', maxZoom:19
+}).addTo(map);
+addMarker(HOME, -1);
+
+// --- Marker helper ---
+function addMarker(stop, idx){
+  const isHome = idx === -1 || idx === 'home';
+  const icon = L.divIcon({
+    className:'',
+    html:`<div style="
+      width:${isHome?34:28}px;height:${isHome?34:28}px;
+      background:${isHome?'#f97316':'#1a1d27'};
+      border:2px solid #f97316;border-radius:50%;
+      display:grid;place-items:center;
+      font-size:${isHome?16:11}px;font-weight:700;
+      color:${isHome?'#fff':'#f97316'};
+      font-family:'DM Mono',monospace;
+      box-shadow:0 2px 8px rgba(0,0,0,.5);
+    ">${isHome?'🏠':(idx+1)}</div>`,
+    iconSize:[isHome?34:28,isHome?34:28],
+    iconAnchor:[isHome?17:14,isHome?17:14]
+  });
+  const m = L.marker([stop.lat, stop.lng],{icon}).addTo(map);
+  m.bindPopup(`<b>${stop.name}</b><br>${stop.address||''}`);
+  markers.push(m);
+}
+
+// --- CSV Upload ---
+const dropZone=document.getElementById('dropZone');
+const csvInput=document.getElementById('csvInput');
+dropZone.addEventListener('click',()=>csvInput.click());
+dropZone.addEventListener('dragover',e=>{e.preventDefault();dropZone.classList.add('dragover')});
+dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop',e=>{e.preventDefault();dropZone.classList.remove('dragover');handleFile(e.dataTransfer.files[0])});
+csvInput.addEventListener('change',e=>handleFile(e.target.files[0]));
+
+function handleFile(file){
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>parseCSV(e.target.result);
+  reader.readAsText(file);
+}
+
+function parseCSV(text){
+  const lines=text.trim().split(/\r?\n/).filter(l=>l.trim());
+  if(lines.length<2){alert('CSV needs a header + at least one row');return}
+  const hdr=lines[0].toLowerCase().split(',').map(s=>s.trim());
+  const hasLatLng=hdr.includes('lat')&&hdr.includes('lng')||hdr.includes('latitude')&&hdr.includes('longitude');
+  const nameIdx=hdr.findIndex(h=>/name|location|stop|company/i.test(h));
+  const addrIdx=hdr.findIndex(h=>/address|addr|street|location/i.test(h));
+  const latIdx=hdr.findIndex(h=>/^lat(itude)?$/.test(h));
+  const lngIdx=hdr.findIndex(h=>/^(lng|lon|longitude)$/.test(h));
+
+  stops=[];
+  for(let i=1;i<lines.length;i++){
+    const cols=parseCSVLine(lines[i]);
+    if(cols.length<2)continue;
+    const s={name:cols[nameIdx>=0?nameIdx:0]?.trim()||`Stop ${i}`,address:'',lat:null,lng:null,status:'pending'};
+    if(hasLatLng&&latIdx>=0&&lngIdx>=0){
+      s.lat=parseFloat(cols[latIdx]);s.lng=parseFloat(cols[lngIdx]);
+      if(!isNaN(s.lat)&&!isNaN(s.lng))s.status='ok';
+      s.address=addrIdx>=0?cols[addrIdx]?.trim():'';
+    } else {
+      s.address=cols[addrIdx>=0?addrIdx: (nameIdx===0?1:0)]?.trim()||'';
+    }
+    if(s.name||s.address)stops.push(s);
+  }
+  renderStops();
+  document.getElementById('routeBtn').disabled=false;
+  geocodePending();
+}
+
+function parseCSVLine(line){
+  const r=[];let cur='',inQ=false;
+  for(const ch of line){
+    if(ch==='"'){inQ=!inQ}else if(ch===','&&!inQ){r.push(cur);cur=''}else{cur+=ch}
+  }
+  r.push(cur);return r;
+}
+
+// --- Geocode via Nominatim (1 req/sec) ---
+async function geocodePending(){
+  const loader=document.getElementById('loader');
+  loader.classList.add('show');
+  for(const s of stops){
+    if(s.status==='ok')continue;
+    if(!s.address){s.status='err';renderStops();continue}
+    try{
+      const q=encodeURIComponent(s.address);
+      const res=await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${q}&limit=1`,{headers:{'User-Agent':'RouteDispatcher/1.0'}});
+      const data=await res.json();
+      if(data.length){s.lat=parseFloat(data[0].lat);s.lng=parseFloat(data[0].lon);s.status='ok'}
+      else{s.status='err'}
+    }catch{s.status='err'}
+    renderStops();
+    await new Promise(r=>setTimeout(r,1100));
+  }
+  loader.classList.remove('show');
+}
+
+// --- Render sidebar ---
+function renderStops(){
+  const el=document.getElementById('stopList');
+  el.innerHTML=stops.map((s,i)=>`
+    <div class="stop-item">
+      <div class="stop-num">${i+1}</div>
+      <div class="stop-info">
+        <div class="name">${esc(s.name)}</div>
+        <div class="addr">${esc(s.address)}</div>
+        <div class="status ${s.status}">${s.status==='ok'?'✓ geocoded':s.status==='err'?'✗ not found':'⏳ geocoding…'}</div>
+      </div>
+    </div>`).join('');
+}
+function esc(s){return s?s.replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}
+
+// --- Route optimization (nearest neighbour) ---
+document.getElementById('routeBtn').addEventListener('click', optimizeRoute);
+document.getElementById('clearBtn').addEventListener('click', ()=>{
+  stops=[];renderStops();clearMap();
+  document.getElementById('routeBtn').disabled=true;
+  document.getElementById('summary').style.display='none';
+});
+
+function clearMap(){
+  markers.forEach(m=>map.removeLayer(m));markers=[];
+  if(routeLine)map.removeLayer(routeLine);
+  addMarker(HOME,-1);
+}
+
+function optimizeRoute(){
+  const valid=stops.filter(s=>s.status==='ok');
+  if(!valid.length){alert('No geocoded stops to route');return}
+
+  // Nearest-neighbour from HOME
+  const ordered=[];
+  const remaining=[...valid];
+  let cur={lat:HOME.lat,lng:HOME.lng};
+  while(remaining.length){
+    let best=0,bestD=Infinity;
+    remaining.forEach((s,i)=>{const d=dist(cur,s);if(d<bestD){bestD=d;best=i}});
+    ordered.push(remaining.splice(best,1)[0]);
+    cur=ordered[ordered.length-1];
+  }
+
+  // Reorder stops array to match
+  const orderedNames=new Set(ordered.map(s=>s.name+s.address));
+  stops=ordered.concat(stops.filter(s=>!orderedNames.has(s.name+s.address)));
+  renderStops();
+
+  // Draw on map
+  clearMap();
+  const pts=[[HOME.lat,HOME.lng]];
+  ordered.forEach((s,i)=>{addMarker(s,i);pts.push([s.lat,s.lng])});
+  pts.push([HOME.lat,HOME.lng]); // return home
+  addMarker(HOME,'home');
+
+  routeLine=L.polyline(pts,{color:'#f97316',weight:3,opacity:.8,dashArray:'8 6'}).addTo(map);
+  map.fitBounds(routeLine.getBounds().pad(.1));
+
+  // Summary
+  let totalKm=0;
+  for(let i=1;i<pts.length;i++) totalKm+=dist({lat:pts[i-1][0],lng:pts[i-1][1]},{lat:pts[i][0],lng:pts[i][1]});
+  const mi=(totalKm*.621371).toFixed(1);
+  document.getElementById('sumStops').textContent=ordered.length;
+  document.getElementById('sumDist').textContent=`~${mi} mi`;
+  document.getElementById('summary').style.display='flex';
+}
+
+function dist(a,b){
+  const R=6371,dLat=(b.lat-a.lat)*Math.PI/180,dLng=(b.lng-a.lng)*Math.PI/180;
+  const x=Math.sin(dLat/2)**2+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+}
+</script>
+</body>
+</html>
